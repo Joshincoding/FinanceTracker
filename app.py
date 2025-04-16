@@ -49,23 +49,37 @@ def add_transaction():
 
 @app.route('/register', methods=['POST'])
 def register():
-    data = request.json
-    print("REGISTER DATA:", data)
+    try:
+        data = request.json
+        print("REGISTER DATA:", data)
 
-    if not data or 'email' not in data or 'password' not in data:
-        return jsonify(message="Email and password required"), 400
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify(message="Email and password required"), 400
 
-    email = data['email']
-    password = data['password']
+        email = data['email']
+        password = data['password']
 
-    if mongo.db.users.find_one({'email': email}):
-        return jsonify(message="User already exists"), 409
+        # Check Mongo connection before using it
+        print("Checking Mongo connection...")
+        print("Mongo DB object:", mongo.db)
+        print("Mongo client:", mongo.cx)
 
-    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-    user = {"email": email, "password": hashed_pw, "role": "user"}
-    mongo.db.users.insert_one(user)
-    return jsonify(message="User registered"), 201
+        existing_user = mongo.db.users.find_one({'email': email})
+        print("Existing user:", existing_user)
 
+        if existing_user:
+            return jsonify(message="User already exists"), 409
+
+        hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+        user = {"email": email, "password": hashed_pw, "role": "user"}
+        result = mongo.db.users.insert_one(user)
+        print("Inserted user ID:", result.inserted_id)
+
+        return jsonify(message="User registered"), 201
+
+    except Exception as e:
+        print("🔥 REGISTER ERROR:", str(e))  # Log full traceback to Render logs
+        return jsonify(message="Internal server error", error=str(e)), 500
 
 
 @app.route('/transactions', methods=['GET'])
