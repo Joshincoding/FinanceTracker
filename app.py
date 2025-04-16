@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-//CORS(app)
 CORS(app, origins=["*"], supports_credentials=True)
 
 app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb://localhost:27017/finance_tracker")
