@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True, origins=["https://finance-trackerfrontend.vercel.app"])
+
 
 app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb+srv://FT:1@cluster0.sre23jl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "super-secret-key")
