@@ -59,6 +59,26 @@ def add_transaction():
     mongo.db.transactions.insert_one(data)
     return jsonify(message="Transaction added"), 201
 
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    print("REGISTER DATA:", data)  # ⬅️ Add this
+
+    if not data or 'email' not in data or 'password' not in data:
+        return jsonify(message="Email and password required"), 400
+
+    email = data['email']
+    password = data['password']
+
+    if mongo.db.users.find_one({'email': email}):
+        return jsonify(message="User already exists"), 409
+
+    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    user = {"email": email, "password": hashed_pw, "role": "user"}
+    mongo.db.users.insert_one(user)
+    return jsonify(message="User registered"), 201
+
+
 @app.route('/transactions', methods=['GET'])
 @jwt_required()
 def get_transactions():
