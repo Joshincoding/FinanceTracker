@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["*"], supports_credentials=True)
+CORS(app)
 
 app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb+srv://FT:1@cluster0.sre23jl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "super-secret-key")
@@ -83,6 +83,29 @@ def get_transactions():
             except:
                 pass
     return jsonify(transactions)
+
+@app.route('/transactions/<id>', methods=['PUT'])
+@jwt_required()
+def update_transaction(id):
+    user_id = get_jwt_identity()
+    data = request.json
+
+    # Convert string date to datetime if present
+    if 'date' in data:
+        try:
+            data['date'] = datetime.datetime.strptime(data['date'], '%Y-%m-%d')
+        except ValueError:
+            return jsonify(message="Invalid date format. Use YYYY-MM-DD."), 400
+
+    result = mongo.db.transactions.update_one(
+        {'_id': ObjectId(id), 'user_id': user_id},
+        {'$set': data}
+    )
+
+    if result.matched_count == 0:
+        return jsonify(message="Transaction not found"), 404
+    return jsonify(message="Transaction updated"), 200
+
 
 @app.route('/transactions/<id>', methods=['DELETE'])
 @jwt_required()
