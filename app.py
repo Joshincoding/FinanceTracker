@@ -63,8 +63,9 @@ def add_transaction():
     category = data.get('category')
     if category:
         total_spent = sum(
-            t.get('amount', 0)
+            float(t.get('amount', 0))
             for t in mongo.db.transactions.find({'user_id': user_id, 'category': category})
+            if t.get('amount') is not None
         )
         budget = mongo.db.budgets.find_one({'user_id': user_id, 'category': category})
         if budget and total_spent > float(budget['limit']):
