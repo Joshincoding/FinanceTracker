@@ -82,6 +82,47 @@ def register():
         return jsonify(message="Internal server error", error=str(e)), 500
 
 
+@app.route('/transactions', methods=['POST'])
+@jwt_required()
+def add_transaction():
+    user_id = get_jwt_identity()
+    data = request.json
+    data['user_id'] = user_id
+
+    # Handle date format
+    if 'date' not in data:
+        data['date'] = datetime.datetime.now()
+    else:
+        data['date'] = datetime.datetime.strptime(data['date'], '%Y-%m-%d')
+
+    # Insert transaction
+    mongo.db.transactions.insert_one(data)
+
+    # 👉 Get total spend for category
+    category = data.get('category')
+    total_spent = sum(t['amount'] for t in mongo.db.transactions.find({
+        'user_id': user_id,
+        'category': category
+    }))
+
+    # 👉 Get budget for that category
+    budget = mongo.db.budgets.find_one({
+        'user_id': user_id,
+        'category': category
+    })
+
+    if budget and total_spent > float(budget['limit']):
+        # Trigger notification
+        mongo.db.notifications.insert_one({
+            "user_id": user_id,
+            "message": f"🚨 You’ve exceeded your ${budget['limit']} budget for {category}!",
+            "timestamp": datetime.datetime.utcnow(),
+            "read": False
+        })
+
+    return jsonify(message="Transaction added"), 201
+
+
 @app.route('/transactions', methods=['GET'])
 @jwt_required()
 def get_transactions():
@@ -141,6 +182,7 @@ def delete_transaction(id):
     if result.deleted_count == 1:
         return jsonify(message="Deleted"), 200
     return jsonify(message="Transaction not found"), 404
+
 
 @app.route('/categories', methods=['POST'])
 @jwt_required()
