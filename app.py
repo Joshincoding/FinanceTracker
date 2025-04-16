@@ -151,6 +151,28 @@ def create_category():
     mongo.db.categories.insert_one(data)
     return jsonify(message="Category created"), 201
 
+@app.route('/notifications', methods=['POST'])
+@jwt_required()
+def create_notification():
+    user_id = get_jwt_identity()
+    data = request.json
+    data['user_id'] = user_id
+    data['timestamp'] = datetime.datetime.utcnow()
+    data['read'] = False
+    mongo.db.notifications.insert_one(data)
+    return jsonify(message="Notification created"), 201
+
+@app.route('/notifications', methods=['GET'])
+@jwt_required()
+def get_notifications():
+    user_id = get_jwt_identity()
+    notifs = list(mongo.db.notifications.find({'user_id': user_id}))
+    for n in notifs:
+        n['_id'] = str(n['_id'])
+        n['timestamp'] = n['timestamp'].isoformat()
+    return jsonify(notifs)
+
+
 @app.route('/categories', methods=['GET'])
 @jwt_required()
 def get_categories():
