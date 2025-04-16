@@ -13,7 +13,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, supports_credentials=True, origins=["https://finance-trackerfrontend.vercel.app"])
 
-
 app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb+srv://FT:1@cluster0.sre23jl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "super-secret-key")
 
@@ -21,66 +20,32 @@ mongo = PyMongo(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
-
-
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
-    print("LOGIN DATA:", data)  # Check what you're receiving
     user = mongo.db.users.find_one({"email": data['email']})
     if user and bcrypt.check_password_hash(user['password'], data['password']):
         access_token = create_access_token(identity=str(user['_id']), expires_delta=datetime.timedelta(days=1))
         return jsonify(token=access_token)
     return jsonify(message="Invalid credentials"), 401
 
-
-@app.route('/transactions', methods=['POST'])
-@jwt_required()
-def add_transaction():
-    user_id = get_jwt_identity()
-    data = request.json
-    data['user_id'] = user_id
-    if 'date' not in data:
-        data['date'] = datetime.datetime.now()
-    else:
-        data['date'] = datetime.datetime.strptime(data['date'], '%Y-%m-%d')
-    mongo.db.transactions.insert_one(data)
-    return jsonify(message="Transaction added"), 201
-
 @app.route('/register', methods=['POST'])
 def register():
     try:
         data = request.json
-        print("REGISTER DATA:", data)
-
         if not data or 'email' not in data or 'password' not in data:
             return jsonify(message="Email and password required"), 400
-
         email = data['email']
         password = data['password']
-
-        # Check Mongo connection before using it
-        print("Checking Mongo connection...")
-        print("Mongo DB object:", mongo.db)
-        print("Mongo client:", mongo.cx)
-
         existing_user = mongo.db.users.find_one({'email': email})
-        print("Existing user:", existing_user)
-
         if existing_user:
             return jsonify(message="User already exists"), 409
-
         hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
         user = {"email": email, "password": hashed_pw, "role": "user"}
-        result = mongo.db.users.insert_one(user)
-        print("Inserted user ID:", result.inserted_id)
-
+        mongo.db.users.insert_one(user)
         return jsonify(message="User registered"), 201
-
     except Exception as e:
-        print("🔥 REGISTER ERROR:", str(e))  # Log full traceback to Render logs
         return jsonify(message="Internal server error", error=str(e)), 500
-
 
 @app.route('/transactions', methods=['POST'])
 @jwt_required()
@@ -88,47 +53,34 @@ def add_transaction():
     user_id = get_jwt_identity()
     data = request.json
     data['user_id'] = user_id
-
-    # Handle date format
     if 'date' not in data:
         data['date'] = datetime.datetime.now()
     else:
         data['date'] = datetime.datetime.strptime(data['date'], '%Y-%m-%d')
-
-    # Insert transaction
     mongo.db.transactions.insert_one(data)
 
-    # 👉 Get total spend for category
+    # === 🔔 Notification Trigger ===
     category = data.get('category')
-    total_spent = sum(t['amount'] for t in mongo.db.transactions.find({
-        'user_id': user_id,
-        'category': category
-    }))
-
-    # 👉 Get budget for that category
-    budget = mongo.db.budgets.find_one({
-        'user_id': user_id,
-        'category': category
-    })
-
-    if budget and total_spent > float(budget['limit']):
-        # Trigger notification
-        mongo.db.notifications.insert_one({
-            "user_id": user_id,
-            "message": f"🚨 You’ve exceeded your ${budget['limit']} budget for {category}!",
-            "timestamp": datetime.datetime.utcnow(),
-            "read": False
-        })
-
+    if category:
+        total_spent = sum(
+            t.get('amount', 0)
+            for t in mongo.db.transactions.find({'user_id': user_id, 'category': category})
+        )
+        budget = mongo.db.budgets.find_one({'user_id': user_id, 'category': category})
+        if budget and total_spent > float(budget['limit']):
+            mongo.db.notifications.insert_one({
+                "user_id": user_id,
+                "message": f"🚨 You’ve exceeded your ${budget['limit']} budget for {category}!",
+                "timestamp": datetime.datetime.utcnow(),
+                "read": False
+            })
     return jsonify(message="Transaction added"), 201
-
 
 @app.route('/transactions', methods=['GET'])
 @jwt_required()
 def get_transactions():
     user_id = get_jwt_identity()
     date_filter = request.args.get('date')
-
     query = {'user_id': user_id}
     if date_filter:
         try:
@@ -137,18 +89,11 @@ def get_transactions():
             query['date'] = {'$gte': start_date, '$lt': end_date}
         except ValueError:
             return jsonify(message="Invalid date format. Use YYYY-MM-DD."), 400
-
     transactions = list(mongo.db.transactions.find(query))
-
     for t in transactions:
         t['_id'] = str(t['_id'])
         if isinstance(t['date'], datetime.datetime):
             t['date'] = t['date'].strftime('%Y-%m-%d')
-        elif isinstance(t['date'], str):
-            try:
-                t['date'] = datetime.datetime.strptime(t['date'], '%Y-%m-%d').strftime('%Y-%m-%d')
-            except:
-                pass
     return jsonify(transactions)
 
 @app.route('/transactions/<id>', methods=['PUT'])
@@ -156,23 +101,15 @@ def get_transactions():
 def update_transaction(id):
     user_id = get_jwt_identity()
     data = request.json
-
-    # Convert string date to datetime if present
     if 'date' in data:
         try:
             data['date'] = datetime.datetime.strptime(data['date'], '%Y-%m-%d')
         except ValueError:
             return jsonify(message="Invalid date format. Use YYYY-MM-DD."), 400
-
-    result = mongo.db.transactions.update_one(
-        {'_id': ObjectId(id), 'user_id': user_id},
-        {'$set': data}
-    )
-
+    result = mongo.db.transactions.update_one({'_id': ObjectId(id), 'user_id': user_id}, {'$set': data})
     if result.matched_count == 0:
         return jsonify(message="Transaction not found"), 404
     return jsonify(message="Transaction updated"), 200
-
 
 @app.route('/transactions/<id>', methods=['DELETE'])
 @jwt_required()
@@ -183,7 +120,6 @@ def delete_transaction(id):
         return jsonify(message="Deleted"), 200
     return jsonify(message="Transaction not found"), 404
 
-
 @app.route('/categories', methods=['POST'])
 @jwt_required()
 def create_category():
@@ -192,28 +128,6 @@ def create_category():
     data['user_id'] = user_id
     mongo.db.categories.insert_one(data)
     return jsonify(message="Category created"), 201
-
-@app.route('/notifications', methods=['POST'])
-@jwt_required()
-def create_notification():
-    user_id = get_jwt_identity()
-    data = request.json
-    data['user_id'] = user_id
-    data['timestamp'] = datetime.datetime.utcnow()
-    data['read'] = False
-    mongo.db.notifications.insert_one(data)
-    return jsonify(message="Notification created"), 201
-
-@app.route('/notifications', methods=['GET'])
-@jwt_required()
-def get_notifications():
-    user_id = get_jwt_identity()
-    notifs = list(mongo.db.notifications.find({'user_id': user_id}))
-    for n in notifs:
-        n['_id'] = str(n['_id'])
-        n['timestamp'] = n['timestamp'].isoformat()
-    return jsonify(notifs)
-
 
 @app.route('/categories', methods=['GET'])
 @jwt_required()
@@ -241,6 +155,27 @@ def get_budgets():
     for b in budgets:
         b['_id'] = str(b['_id'])
     return jsonify(budgets)
+
+@app.route('/notifications', methods=['POST'])
+@jwt_required()
+def create_notification():
+    user_id = get_jwt_identity()
+    data = request.json
+    data['user_id'] = user_id
+    data['timestamp'] = datetime.datetime.utcnow()
+    data['read'] = False
+    mongo.db.notifications.insert_one(data)
+    return jsonify(message="Notification created"), 201
+
+@app.route('/notifications', methods=['GET'])
+@jwt_required()
+def get_notifications():
+    user_id = get_jwt_identity()
+    notifs = list(mongo.db.notifications.find({'user_id': user_id}))
+    for n in notifs:
+        n['_id'] = str(n['_id'])
+        n['timestamp'] = n['timestamp'].isoformat()
+    return jsonify(notifs)
 
 @app.route('/me', methods=['GET'])
 @jwt_required()
