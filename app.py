@@ -38,11 +38,13 @@ def register():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
+    print("LOGIN DATA:", data)  # Check what you're receiving
     user = mongo.db.users.find_one({"email": data['email']})
     if user and bcrypt.check_password_hash(user['password'], data['password']):
         access_token = create_access_token(identity=str(user['_id']), expires_delta=datetime.timedelta(days=1))
         return jsonify(token=access_token)
     return jsonify(message="Invalid credentials"), 401
+
 
 @app.route('/transactions', methods=['POST'])
 @jwt_required()
